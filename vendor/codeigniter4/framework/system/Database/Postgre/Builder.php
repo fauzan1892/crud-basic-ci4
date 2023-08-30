@@ -1,407 +1,490 @@
 <?php
+
 /**
- * CodeIgniter
+ * This file is part of CodeIgniter 4 framework.
  *
- * An open source application development framework for PHP
+ * (c) CodeIgniter Foundation <admin@codeigniter.com>
  *
- * This content is released under the MIT License (MIT)
- *
- * Copyright (c) 2014-2019 British Columbia Institute of Technology
- * Copyright (c) 2019-2020 CodeIgniter Foundation
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * @package    CodeIgniter
- * @author     CodeIgniter Dev Team
- * @copyright  2019-2020 CodeIgniter Foundation
- * @license    https://opensource.org/licenses/MIT	MIT License
- * @link       https://codeigniter.com
- * @since      Version 4.0.0
- * @filesource
+ * For the full copyright and license information, please view
+ * the LICENSE file that was distributed with this source code.
  */
 
 namespace CodeIgniter\Database\Postgre;
 
 use CodeIgniter\Database\BaseBuilder;
 use CodeIgniter\Database\Exceptions\DatabaseException;
-use http\Encoding\Stream\Inflate;
+use CodeIgniter\Database\RawSql;
+use InvalidArgumentException;
 
 /**
  * Builder for Postgre
  */
 class Builder extends BaseBuilder
 {
+    /**
+     * ORDER BY random keyword
+     *
+     * @var array
+     */
+    protected $randomKeyword = [
+        'RANDOM()',
+    ];
 
-	/**
-	 * ORDER BY random keyword
-	 *
-	 * @var array
-	 */
-	protected $randomKeyword = [
-		'RANDOM()',
-	];
+    /**
+     * Specifies which sql statements
+     * support the ignore option.
+     *
+     * @var array
+     */
+    protected $supportedIgnoreStatements = [
+        'insert' => 'ON CONFLICT DO NOTHING',
+    ];
 
-	/**
-	 * Specifies which sql statements
-	 * support the ignore option.
-	 *
-	 * @var array
-	 */
-	protected $supportedIgnoreStatements = [
-		'insert' => 'ON CONFLICT DO NOTHING',
-	];
+    /**
+     * Checks if the ignore option is supported by
+     * the Database Driver for the specific statement.
+     *
+     * @return string
+     */
+    protected function compileIgnore(string $statement)
+    {
+        $sql = parent::compileIgnore($statement);
 
-	//--------------------------------------------------------------------
+        if (! empty($sql)) {
+            $sql = ' ' . trim($sql);
+        }
 
-	/**
-	 * Compile Ignore Statement
-	 *
-	 * Checks if the ignore option is supported by
-	 * the Database Driver for the specific statement.
-	 *
-	 * @param string $statement
-	 *
-	 * @return string
-	 */
-	protected function compileIgnore(string $statement)
-	{
-		$sql = parent::compileIgnore($statement);
+        return $sql;
+    }
 
-		if (! empty($sql))
-		{
-			$sql = ' ' . trim($sql);
-		}
+    /**
+     * ORDER BY
+     *
+     * @param string $direction ASC, DESC or RANDOM
+     *
+     * @return BaseBuilder
+     */
+    public function orderBy(string $orderBy, string $direction = '', ?bool $escape = null)
+    {
+        $direction = strtoupper(trim($direction));
+        if ($direction === 'RANDOM') {
+            if (ctype_digit($orderBy)) {
+                $orderBy = (float) ($orderBy > 1 ? "0.{$orderBy}" : $orderBy);
+            }
 
-		return $sql;
-	}
+            if (is_float($orderBy)) {
+                $this->db->simpleQuery("SET SEED {$orderBy}");
+            }
 
-	//--------------------------------------------------------------------
+            $orderBy   = $this->randomKeyword[0];
+            $direction = '';
+            $escape    = false;
+        }
 
-	/**
-	 * ORDER BY
-	 *
-	 * @param string  $orderBy
-	 * @param string  $direction ASC, DESC or RANDOM
-	 * @param boolean $escape
-	 *
-	 * @return BaseBuilder
-	 */
-	public function orderBy(string $orderBy, string $direction = '', bool $escape = null)
-	{
-		$direction = strtoupper(trim($direction));
-		if ($direction === 'RANDOM')
-		{
-			if (! is_float($orderBy) && ctype_digit((string) $orderBy))
-			{
-				$orderBy = (float) ($orderBy > 1 ? "0.{$orderBy}" : $orderBy);
-			}
+        return parent::orderBy($orderBy, $direction, $escape);
+    }
 
-			if (is_float($orderBy))
-			{
-				$this->db->simpleQuery("SET SEED {$orderBy}");
-			}
+    /**
+     * Increments a numeric column by the specified value.
+     *
+     * @return mixed
+     *
+     * @throws DatabaseException
+     */
+    public function increment(string $column, int $value = 1)
+    {
+        $column = $this->db->protectIdentifiers($column);
 
-			$orderBy   = $this->randomKeyword[0];
-			$direction = '';
-			$escape    = false;
-		}
+        $sql = $this->_update($this->QBFrom[0], [$column => "to_number({$column}, '9999999') + {$value}"]);
 
-		return parent::orderBy($orderBy, $direction, $escape);
-	}
+        if (! $this->testMode) {
+            $this->resetWrite();
 
-	//--------------------------------------------------------------------
+            return $this->db->query($sql, $this->binds, false);
+        }
 
-	/**
-	 * Increments a numeric column by the specified value.
-	 *
-	 * @param string  $column
-	 * @param integer $value
-	 *
-	 * @throws DatabaseException
-	 *
-	 * @return mixed
-	 */
-	public function increment(string $column, int $value = 1)
-	{
-		$column = $this->db->protectIdentifiers($column);
+        return true;
+    }
 
-		$sql = $this->_update($this->QBFrom[0], [$column => "to_number({$column}, '9999999') + {$value}"]);
+    /**
+     * Decrements a numeric column by the specified value.
+     *
+     * @return mixed
+     *
+     * @throws DatabaseException
+     */
+    public function decrement(string $column, int $value = 1)
+    {
+        $column = $this->db->protectIdentifiers($column);
 
-		return $this->db->query($sql, $this->binds, false);
-	}
+        $sql = $this->_update($this->QBFrom[0], [$column => "to_number({$column}, '9999999') - {$value}"]);
 
-	//--------------------------------------------------------------------
+        if (! $this->testMode) {
+            $this->resetWrite();
 
-	/**
-	 * Decrements a numeric column by the specified value.
-	 *
-	 * @param string  $column
-	 * @param integer $value
-	 *
-	 * @throws DatabaseException
-	 *
-	 * @return mixed
-	 */
-	public function decrement(string $column, int $value = 1)
-	{
-		$column = $this->db->protectIdentifiers($column);
+            return $this->db->query($sql, $this->binds, false);
+        }
 
-		$sql = $this->_update($this->QBFrom[0], [$column => "to_number({$column}, '9999999') - {$value}"]);
+        return true;
+    }
 
-		return $this->db->query($sql, $this->binds, false);
-	}
+    /**
+     * Compiles an replace into string and runs the query.
+     * Because PostgreSQL doesn't support the replace into command,
+     * we simply do a DELETE and an INSERT on the first key/value
+     * combo, assuming that it's either the primary key or a unique key.
+     *
+     * @param array|null $set An associative array of insert values
+     *
+     * @return mixed
+     *
+     * @throws DatabaseException
+     */
+    public function replace(?array $set = null)
+    {
+        if ($set !== null) {
+            $this->set($set);
+        }
 
-	//--------------------------------------------------------------------
+        if (! $this->QBSet) {
+            if ($this->db->DBDebug) {
+                throw new DatabaseException('You must use the "set" method to update an entry.');
+            }
 
-	/**
-	 * Replace
-	 *
-	 * Compiles an replace into string and runs the query.
-	 * Because PostgreSQL doesn't support the replace into command,
-	 * we simply do a DELETE and an INSERT on the first key/value
-	 * combo, assuming that it's either the primary key or a unique key.
-	 *
-	 * @param array $set An associative array of insert values
-	 *
-	 * @return   mixed
-	 * @throws   DatabaseException
-	 * @internal param true $bool returns the generated SQL, false executes the query.
-	 */
-	public function replace(array $set = null)
-	{
-		if ($set !== null)
-		{
-			$this->set($set);
-		}
+            return false; // @codeCoverageIgnore
+        }
 
-		if (! $this->QBSet)
-		{
-			if (CI_DEBUG)
-			{
-				throw new DatabaseException('You must use the "set" method to update an entry.');
-			}
-			return false;
-		}
+        $table = $this->QBFrom[0];
+        $set   = $this->binds;
 
-		$table = $this->QBFrom[0];
+        array_walk($set, static function (array &$item) {
+            $item = $item[0];
+        });
 
-		$set = $this->binds;
+        $key   = array_key_first($set);
+        $value = $set[$key];
 
-		// We need to grab out the actual values from
-		// the way binds are stored with escape flag.
-		array_walk($set, function (&$item) {
-			$item = $item[0];
-		});
+        $builder = $this->db->table($table);
+        $exists  = $builder->where($key, $value, true)->get()->getFirstRow();
 
-		$keys   = array_keys($set);
-		$values = array_values($set);
+        if (empty($exists) && $this->testMode) {
+            $result = $this->getCompiledInsert();
+        } elseif (empty($exists)) {
+            $result = $builder->insert($set);
+        } elseif ($this->testMode) {
+            $result = $this->where($key, $value, true)->getCompiledUpdate();
+        } else {
+            array_shift($set);
+            $result = $builder->where($key, $value, true)->update($set);
+        }
 
-		$builder = $this->db->table($table);
-		$exists  = $builder->where("$keys[0] = $values[0]", null, false)->get()->getFirstRow();
+        unset($builder);
+        $this->resetWrite();
+        $this->binds = [];
 
-		if (empty($exists))
-		{
-			$result = $builder->insert($set);
-		}
-		else
-		{
-			array_pop($set);
-			$result = $builder->update($set, "$keys[0] = $values[0]");
-		}
+        return $result;
+    }
 
-		unset($builder);
-		$this->resetWrite();
+    /**
+     * Generates a platform-specific insert string from the supplied data
+     */
+    protected function _insert(string $table, array $keys, array $unescapedKeys): string
+    {
+        return trim(sprintf('INSERT INTO %s (%s) VALUES (%s) %s', $table, implode(', ', $keys), implode(', ', $unescapedKeys), $this->compileIgnore('insert')));
+    }
 
-		return $result;
-	}
+    /**
+     * Generates a platform-specific insert string from the supplied data.
+     */
+    protected function _insertBatch(string $table, array $keys, array $values): string
+    {
+        $sql = $this->QBOptions['sql'] ?? '';
 
-	//--------------------------------------------------------------------
+        // if this is the first iteration of batch then we need to build skeleton sql
+        if ($sql === '') {
+            $sql = 'INSERT INTO ' . $table . '(' . implode(', ', $keys) . ")\n{:_table_:}\n";
 
-	/**
-	 * Delete
-	 *
-	 * Compiles a delete string and runs the query
-	 *
-	 * @param mixed   $where
-	 * @param integer $limit
-	 * @param boolean $reset_data
-	 *
-	 * @return   mixed
-	 * @throws   DatabaseException
-	 * @internal param the $mixed where clause
-	 * @internal param the $mixed limit clause
-	 * @internal param $bool
-	 */
-	public function delete($where = '', int $limit = null, bool $reset_data = true)
-	{
-		if (! empty($limit) || ! empty($this->QBLimit))
-		{
-			throw new DatabaseException('PostgreSQL does not allow LIMITs on DELETE queries.');
-		}
+            $sql .= $this->compileIgnore('insert');
 
-		return parent::delete($where, $limit, $reset_data);
-	}
+            $this->QBOptions['sql'] = $sql;
+        }
 
-	//--------------------------------------------------------------------
+        if (isset($this->QBOptions['setQueryAsData'])) {
+            $data = $this->QBOptions['setQueryAsData'];
+        } else {
+            $data = 'VALUES ' . implode(', ', $this->formatValues($values));
+        }
 
-	/**
-	 * LIMIT string
-	 *
-	 * Generates a platform-specific LIMIT clause.
-	 *
-	 * @param string $sql SQL Query
-	 *
-	 * @return string
-	 */
-	protected function _limit(string $sql): string
-	{
-		return $sql . ' LIMIT ' . $this->QBLimit . ($this->QBOffset ? " OFFSET {$this->QBOffset}" : '');
-	}
+        return str_replace('{:_table_:}', $data, $sql);
+    }
 
-	//--------------------------------------------------------------------
+    /**
+     * Compiles a delete string and runs the query
+     *
+     * @param mixed $where
+     *
+     * @return mixed
+     *
+     * @throws DatabaseException
+     */
+    public function delete($where = '', ?int $limit = null, bool $resetData = true)
+    {
+        if (! empty($limit) || ! empty($this->QBLimit)) {
+            throw new DatabaseException('PostgreSQL does not allow LIMITs on DELETE queries.');
+        }
 
-	/**
-	 * Update statement
-	 *
-	 * Generates a platform-specific update string from the supplied data
-	 *
-	 * @param string $table
-	 * @param array  $values
-	 *
-	 * @return   string
-	 * @throws   DatabaseException
-	 * @internal param the $string table name
-	 * @internal param the $array update data
-	 */
-	protected function _update(string $table, array $values): string
-	{
-		if (! empty($this->QBLimit))
-		{
-			throw new DatabaseException('Postgres does not support LIMITs with UPDATE queries.');
-		}
+        return parent::delete($where, $limit, $resetData);
+    }
 
-		$this->QBOrderBy = [];
-		return parent::_update($table, $values);
-	}
+    /**
+     * Generates a platform-specific LIMIT clause.
+     */
+    protected function _limit(string $sql, bool $offsetIgnore = false): string
+    {
+        return $sql . ' LIMIT ' . $this->QBLimit . ($this->QBOffset ? " OFFSET {$this->QBOffset}" : '');
+    }
 
-	//--------------------------------------------------------------------
+    /**
+     * Generates a platform-specific update string from the supplied data
+     *
+     * @throws DatabaseException
+     */
+    protected function _update(string $table, array $values): string
+    {
+        if (! empty($this->QBLimit)) {
+            throw new DatabaseException('Postgres does not support LIMITs with UPDATE queries.');
+        }
 
-	/**
-	 * Update_Batch statement
-	 *
-	 * Generates a platform-specific batch update string from the supplied data
-	 *
-	 * @param string $table  Table name
-	 * @param array  $values Update data
-	 * @param string $index  WHERE key
-	 *
-	 * @return string
-	 */
-	protected function _updateBatch(string $table, array $values, string $index): string
-	{
-		$ids = [];
-		foreach ($values as $key => $val)
-		{
-			$ids[] = $val[$index];
+        $this->QBOrderBy = [];
 
-			foreach (array_keys($val) as $field)
-			{
-				if ($field !== $index)
-				{
-					$final[$field][] = "WHEN {$val[$index]} THEN {$val[$field]}";
-				}
-			}
-		}
+        return parent::_update($table, $values);
+    }
 
-		$cases = '';
-		foreach ($final as $k => $v)
-		{
-			$cases .= "{$k} = (CASE {$index}\n"
-					. implode("\n", $v)
-					. "\nELSE {$k} END), ";
-		}
+    /**
+     * Generates a platform-specific delete string from the supplied data
+     */
+    protected function _delete(string $table): string
+    {
+        $this->QBLimit = false;
 
-		$this->where("{$index} IN(" . implode(',', $ids) . ')', null, false);
+        return parent::_delete($table);
+    }
 
-		return "UPDATE {$table} SET " . substr($cases, 0, -2) . $this->compileWhereHaving('QBWhere');
-	}
+    /**
+     * Generates a platform-specific truncate string from the supplied data
+     *
+     * If the database does not support the truncate() command,
+     * then this method maps to 'DELETE FROM table'
+     */
+    protected function _truncate(string $table): string
+    {
+        return 'TRUNCATE ' . $table . ' RESTART IDENTITY';
+    }
 
-	//--------------------------------------------------------------------
+    /**
+     * Platform independent LIKE statement builder.
+     *
+     * In PostgreSQL, the ILIKE operator will perform case insensitive
+     * searches according to the current locale.
+     *
+     * @see https://www.postgresql.org/docs/9.2/static/functions-matching.html
+     */
+    protected function _like_statement(?string $prefix, string $column, ?string $not, string $bind, bool $insensitiveSearch = false): string
+    {
+        $op = $insensitiveSearch === true ? 'ILIKE' : 'LIKE';
 
-	/**
-	 * Delete statement
-	 *
-	 * Generates a platform-specific delete string from the supplied data
-	 *
-	 * @param string $table The table name
-	 *
-	 * @return string
-	 */
-	protected function _delete(string $table): string
-	{
-		$this->QBLimit = false;
-		return parent::_delete($table);
-	}
+        return "{$prefix} {$column} {$not} {$op} :{$bind}:";
+    }
 
-	//--------------------------------------------------------------------
+    /**
+     * Generates the JOIN portion of the query
+     *
+     * @param RawSql|string $cond
+     *
+     * @return BaseBuilder
+     */
+    public function join(string $table, $cond, string $type = '', ?bool $escape = null)
+    {
+        if (! in_array('FULL OUTER', $this->joinTypes, true)) {
+            $this->joinTypes = array_merge($this->joinTypes, ['FULL OUTER']);
+        }
 
-	/**
-	 * Truncate statement
-	 *
-	 * Generates a platform-specific truncate string from the supplied data
-	 *
-	 * If the database does not support the truncate() command,
-	 * then this method maps to 'DELETE FROM table'
-	 *
-	 * @param string $table The table name
-	 *
-	 * @return string
-	 */
-	protected function _truncate(string $table): string
-	{
-		return 'TRUNCATE ' . $table . ' RESTART IDENTITY';
-	}
+        return parent::join($table, $cond, $type, $escape);
+    }
 
-	//--------------------------------------------------------------------
+    /**
+     * Generates a platform-specific upsertBatch string from the supplied data
+     *
+     * @throws DatabaseException
+     */
+    protected function _upsertBatch(string $table, array $keys, array $values): string
+    {
+        $sql = $this->QBOptions['sql'] ?? '';
 
-	/**
-	 * Platform independent LIKE statement builder.
-	 *
-	 * In PostgreSQL, the ILIKE operator will perform case insensitive
-	 * searches according to the current locale.
-	 *
-	 * @see https://www.postgresql.org/docs/9.2/static/functions-matching.html
-	 *
-	 * @param string  $prefix
-	 * @param string  $column
-	 * @param string  $not
-	 * @param string  $bind
-	 * @param boolean $insensitiveSearch
-	 *
-	 * @return string     $like_statement
-	 */
-	public function _like_statement(string $prefix = null, string $column, string $not = null, string $bind, bool $insensitiveSearch = false): string
-	{
-		$op = $insensitiveSearch === true ? 'ILIKE' : 'LIKE';
+        // if this is the first iteration of batch then we need to build skeleton sql
+        if ($sql === '') {
+            $fieldNames = array_map(static fn ($columnName) => trim($columnName, '"'), $keys);
 
-		return "{$prefix} {$column} {$not} {$op} :{$bind}:";
-	}
+            $constraints = $this->QBOptions['constraints'] ?? [];
 
-	//--------------------------------------------------------------------
+            if (empty($constraints)) {
+                $allIndexes = array_filter($this->db->getIndexData($table), static function ($index) use ($fieldNames) {
+                    $hasAllFields = count(array_intersect($index->fields, $fieldNames)) === count($index->fields);
+
+                    return ($index->type === 'UNIQUE' || $index->type === 'PRIMARY') && $hasAllFields;
+                });
+
+                foreach (array_map(static fn ($index) => $index->fields, $allIndexes) as $index) {
+                    $constraints[] = current($index);
+                    // only one index can be used?
+                    break;
+                }
+
+                $constraints = $this->onConstraint($constraints)->QBOptions['constraints'] ?? [];
+            }
+
+            if (empty($constraints)) {
+                if ($this->db->DBDebug) {
+                    throw new DatabaseException('No constraint found for upsert.');
+                }
+
+                return ''; // @codeCoverageIgnore
+            }
+
+            // in value set - replace null with DEFAULT where constraint is presumed not null
+            // autoincrement identity field must use DEFAULT and not NULL
+            // this could be removed in favour of leaving to developer but does make things easier and function like other DBMS
+            foreach ($constraints as $constraint) {
+                $key = array_search(trim($constraint, '"'), $fieldNames, true);
+
+                if ($key !== false) {
+                    foreach ($values as $arrayKey => $value) {
+                        if (strtoupper($value[$key]) === 'NULL') {
+                            $values[$arrayKey][$key] = 'DEFAULT';
+                        }
+                    }
+                }
+            }
+
+            $alias = $this->QBOptions['alias'] ?? '"excluded"';
+
+            if (strtolower($alias) !== '"excluded"') {
+                throw new InvalidArgumentException('Postgres alias is always named "excluded". A custom alias cannot be used.');
+            }
+
+            $updateFields = $this->QBOptions['updateFields'] ?? $this->updateFields($keys, false, $constraints)->QBOptions['updateFields'] ?? [];
+
+            $sql = 'INSERT INTO ' . $table . ' (';
+
+            $sql .= implode(', ', $keys);
+
+            $sql .= ")\n";
+
+            $sql .= '{:_table_:}';
+
+            $sql .= 'ON CONFLICT(' . implode(',', $constraints) . ")\n";
+
+            $sql .= "DO UPDATE SET\n";
+
+            $sql .= implode(
+                ",\n",
+                array_map(
+                    static fn ($key, $value) => $key . ($value instanceof RawSql ?
+                    " = {$value}" :
+                    " = {$alias}.{$value}"),
+                    array_keys($updateFields),
+                    $updateFields
+                )
+            );
+
+            $this->QBOptions['sql'] = $sql;
+        }
+
+        if (isset($this->QBOptions['setQueryAsData'])) {
+            $data = $this->QBOptions['setQueryAsData'];
+        } else {
+            $data = 'VALUES ' . implode(', ', $this->formatValues($values)) . "\n";
+        }
+
+        return str_replace('{:_table_:}', $data, $sql);
+    }
+
+    /**
+     * Generates a platform-specific batch update string from the supplied data
+     */
+    protected function _deleteBatch(string $table, array $keys, array $values): string
+    {
+        $sql = $this->QBOptions['sql'] ?? '';
+
+        // if this is the first iteration of batch then we need to build skeleton sql
+        if ($sql === '') {
+            $constraints = $this->QBOptions['constraints'] ?? [];
+
+            if ($constraints === []) {
+                if ($this->db->DBDebug) {
+                    throw new DatabaseException('You must specify a constraint to match on for batch deletes.'); // @codeCoverageIgnore
+                }
+
+                return ''; // @codeCoverageIgnore
+            }
+
+            $alias = $this->QBOptions['alias'] ?? '_u';
+
+            $sql = 'DELETE FROM ' . $table . "\n";
+
+            $sql .= "USING (\n{:_table_:}";
+
+            $sql .= ') ' . $alias . "\n";
+
+            $sql .= 'WHERE ' . implode(
+                ' AND ',
+                array_map(
+                    static fn ($key, $value) => (
+                        $value instanceof RawSql ?
+                        $value :
+                        (
+                            is_string($key) ?
+                            $table . '.' . $key . ' = ' . $alias . '.' . $value :
+                            $table . '.' . $value . ' = ' . $alias . '.' . $value
+                        )
+                    ),
+                    array_keys($constraints),
+                    $constraints
+                )
+            );
+
+            // convert binds in where
+            foreach ($this->QBWhere as $key => $where) {
+                foreach ($this->binds as $field => $bind) {
+                    $this->QBWhere[$key]['condition'] = str_replace(':' . $field . ':', $bind[0], $where['condition']);
+                }
+            }
+
+            $sql .= ' ' . str_replace(
+                'WHERE ',
+                'AND ',
+                $this->compileWhereHaving('QBWhere')
+            );
+
+            $this->QBOptions['sql'] = $sql;
+        }
+
+        if (isset($this->QBOptions['setQueryAsData'])) {
+            $data = $this->QBOptions['setQueryAsData'];
+        } else {
+            $data = implode(
+                " UNION ALL\n",
+                array_map(
+                    static fn ($value) => 'SELECT ' . implode(', ', array_map(
+                        static fn ($key, $index) => $index . ' ' . $key,
+                        $keys,
+                        $value
+                    )),
+                    $values
+                )
+            ) . "\n";
+        }
+
+        return str_replace('{:_table_:}', $data, $sql);
+    }
 }

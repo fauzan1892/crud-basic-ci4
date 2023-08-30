@@ -1,41 +1,55 @@
-<?php namespace CodeIgniter\Exceptions;
+<?php
+
+/**
+ * This file is part of CodeIgniter 4 framework.
+ *
+ * (c) CodeIgniter Foundation <admin@codeigniter.com>
+ *
+ * For the full copyright and license information, please view
+ * the LICENSE file that was distributed with this source code.
+ */
+
+namespace CodeIgniter\Exceptions;
 
 /**
  * Cast Exceptions.
+ *
+ * @deprecated use CodeIgniter\Entity\Exceptions\CastException instead.
+ *
+ * @codeCoverageIgnore
  */
-
-class CastException extends CriticalError
+class CastException extends CriticalError implements HasExitCodeInterface
 {
+    use DebugTraceableTrait;
 
-	/**
-	 * Error code
-	 *
-	 * @var integer
-	 */
-	protected $code = 3;
+    public function getExitCode(): int
+    {
+        return EXIT_CONFIG;
+    }
 
-	public static function forInvalidJsonFormatException(int $error)
-	{
-		switch($error)
-		{
-			case JSON_ERROR_DEPTH:
-				throw new static(lang('Cast.jsonErrorDepth'));
-			break;
-			case JSON_ERROR_STATE_MISMATCH:
-				throw new static(lang('Cast.jsonErrorStateMismatch'));
-			break;
-			case JSON_ERROR_CTRL_CHAR:
-				throw new static(lang('Cast.jsonErrorCtrlChar'));
-			break;
-			case JSON_ERROR_SYNTAX:
-				throw new static(lang('Cast.jsonErrorSyntax'));
-			break;
-			case JSON_ERROR_UTF8:
-				throw new static(lang('Cast.jsonErrorUtf8'));
-			break;
-			default:
-				throw new static(lang('Cast.jsonErrorUnknown'));
-		}
-	}
+    /**
+     * @return static
+     */
+    public static function forInvalidJsonFormatException(int $error)
+    {
+        switch ($error) {
+            case JSON_ERROR_DEPTH:
+                return new static(lang('Cast.jsonErrorDepth'));
 
+            case JSON_ERROR_STATE_MISMATCH:
+                return new static(lang('Cast.jsonErrorStateMismatch'));
+
+            case JSON_ERROR_CTRL_CHAR:
+                return new static(lang('Cast.jsonErrorCtrlChar'));
+
+            case JSON_ERROR_SYNTAX:
+                return new static(lang('Cast.jsonErrorSyntax'));
+
+            case JSON_ERROR_UTF8:
+                return new static(lang('Cast.jsonErrorUtf8'));
+
+            default:
+                return new static(lang('Cast.jsonErrorUnknown'));
+        }
+    }
 }

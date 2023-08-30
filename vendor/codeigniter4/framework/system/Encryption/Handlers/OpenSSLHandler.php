@@ -1,44 +1,16 @@
 <?php
+
 /**
- * CodeIgniter
+ * This file is part of CodeIgniter 4 framework.
  *
- * An open source application development framework for PHP
+ * (c) CodeIgniter Foundation <admin@codeigniter.com>
  *
- * This content is released under the MIT License (MIT)
- *
- * Copyright (c) 2014-2017 British Columbia Institute of Technology
- * Copyright (c) 2019-2020 CodeIgniter Foundation
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * @package    CodeIgniter
- * @author     CodeIgniter Dev Team
- * @copyright  2014-2017 British Columbia Institute of Technology (https://bcit.ca/)
- * @license    https://opensource.org/licenses/MIT	MIT License
- * @link       https://codeigniter.com
- * @since      Version 4.0.0
- * @filesource
+ * For the full copyright and license information, please view
+ * the LICENSE file that was distributed with this source code.
  */
 
 namespace CodeIgniter\Encryption\Handlers;
 
-use CodeIgniter\Config\BaseConfig;
 use CodeIgniter\Encryption\Exceptions\EncryptionException;
 
 /**
@@ -46,131 +18,137 @@ use CodeIgniter\Encryption\Exceptions\EncryptionException;
  */
 class OpenSSLHandler extends BaseHandler
 {
+    /**
+     * HMAC digest to use
+     *
+     * @var string
+     */
+    protected $digest = 'SHA512';
 
-	/**
-	 * HMAC digest to use
-	 */
-	protected $digest = 'SHA512';
+    /**
+     * List of supported HMAC algorithms
+     *
+     * @var array [name => digest size]
+     */
+    protected array $digestSize = [
+        'SHA224' => 28,
+        'SHA256' => 32,
+        'SHA384' => 48,
+        'SHA512' => 64,
+    ];
 
-	/**
-	 * Cipher to use
-	 */
-	protected $cipher = 'AES-256-CTR';
+    /**
+     * Cipher to use
+     *
+     * @var string
+     */
+    protected $cipher = 'AES-256-CTR';
 
-	// --------------------------------------------------------------------
+    /**
+     * Starter key
+     *
+     * @var string
+     */
+    protected $key = '';
 
-	/**
-	 * Initialize OpenSSL, remembering parameters
-	 *
-	 * @param BaseConfig $config
-	 *
-	 * @throws \CodeIgniter\Encryption\EncryptionException
-	 */
-	public function __construct(BaseConfig $config = null)
-	{
-		parent::__construct($config);
-	}
+    /**
+     * Whether the cipher-text should be raw. If set to false, then it will be base64 encoded.
+     */
+    protected bool $rawData = true;
 
-	/**
-	 * Encrypt plaintext, with optional HMAC and base64 encoding
-	 *
-	 * @param  string $data   Input data
-	 * @param  array  $params Over-ridden parameters, specifically the key
-	 * @return string
-	 * @throws \CodeIgniter\Encryption\EncryptionException
-	 */
-	public function encrypt($data, $params = null)
-	{
-		// Allow key over-ride
-		if (! empty($params))
-		{
-			if (isset($params['key']))
-			{
-				$this->key = $params['key'];
-			}
-			else
-			{
-				$this->key = $params;
-			}
-		}
-		if (empty($this->key))
-		{
-			throw EncryptionException::forNeedsStarterKey();
-		}
+    /**
+     * Encryption key info.
+     * This setting is only used by OpenSSLHandler.
+     *
+     * Set to 'encryption' for CI3 Encryption compatibility.
+     */
+    public string $encryptKeyInfo = '';
 
-		// derive a secret key
-		$secret = \hash_hkdf($this->digest, $this->key);
+    /**
+     * Authentication key info.
+     * This setting is only used by OpenSSLHandler.
+     *
+     * Set to 'authentication' for CI3 Encryption compatibility.
+     */
+    public string $authKeyInfo = '';
 
-		// basic encryption
-		$iv = ($iv_size = \openssl_cipher_iv_length($this->cipher)) ? \openssl_random_pseudo_bytes($iv_size) : null;
+    /**
+     * {@inheritDoc}
+     */
+    public function encrypt($data, $params = null)
+    {
+        // Allow key override
+        if ($params) {
+            $this->key = is_array($params) && isset($params['key']) ? $params['key'] : $params;
+        }
 
-		$data = \openssl_encrypt($data, $this->cipher, $secret, OPENSSL_RAW_DATA, $iv);
+        if (empty($this->key)) {
+            throw EncryptionException::forNeedsStarterKey();
+        }
 
-		if ($data === false)
-		{
-			throw EncryptionException::forEncryptionFailed();
-		}
+        // derive a secret key
+        $encryptKey = \hash_hkdf($this->digest, $this->key, 0, $this->encryptKeyInfo);
 
-		$result = $iv . $data;
+        // basic encryption
+        $iv = ($ivSize = \openssl_cipher_iv_length($this->cipher)) ? \openssl_random_pseudo_bytes($ivSize) : null;
 
-		$hmacKey = \hash_hmac($this->digest, $result, $secret, true);
-		$result  = $hmacKey . $result;
+        $data = \openssl_encrypt($data, $this->cipher, $encryptKey, OPENSSL_RAW_DATA, $iv);
 
-		return $result;
-	}
+        if ($data === false) {
+            throw EncryptionException::forEncryptionFailed();
+        }
 
-	// --------------------------------------------------------------------
+        $result = $this->rawData ? $iv . $data : base64_encode($iv . $data);
 
-	/**
-	 * Decrypt ciphertext, with optional HMAC and base64 encoding
-	 *
-	 * @param  string $data   Encrypted data
-	 * @param  array  $params Over-ridden parameters, specifically the key
-	 * @return string
-	 * @throws \CodeIgniter\Encryption\EncryptionException
-	 */
-	public function decrypt($data, $params = null)
-	{
-		// Allow key over-ride
-		if (! empty($params))
-		{
-			if (isset($params['key']))
-			{
-				$this->key = $params['key'];
-			}
-			else
-			{
-				$this->key = $params;
-			}
-		}
-		if (empty($this->key))
-		{
-			throw EncryptionException::forStarterKeyNeeded();
-		}
+        // derive a secret key
+        $authKey = \hash_hkdf($this->digest, $this->key, 0, $this->authKeyInfo);
 
-		// derive a secret key
-		$secret = \hash_hkdf($this->digest, $this->key);
+        $hmacKey = \hash_hmac($this->digest, $result, $authKey, $this->rawData);
 
-		$hmacLength = self::substr($this->digest, 3) / 8;
-		$hmacKey    = self::substr($data, 0, $hmacLength);
-		$data       = self::substr($data, $hmacLength);
-		$hmacCalc   = \hash_hmac($this->digest, $data, $secret, true);
-		if (! hash_equals($hmacKey, $hmacCalc))
-		{
-			throw EncryptionException::forAuthenticationFailed();
-		}
+        return $hmacKey . $result;
+    }
 
-		if ($iv_size = \openssl_cipher_iv_length($this->cipher))
-		{
-			$iv   = self::substr($data, 0, $iv_size);
-			$data = self::substr($data, $iv_size);
-		}
-		else
-		{
-			$iv = null;
-		}
+    /**
+     * {@inheritDoc}
+     */
+    public function decrypt($data, $params = null)
+    {
+        // Allow key override
+        if ($params) {
+            $this->key = is_array($params) && isset($params['key']) ? $params['key'] : $params;
+        }
 
-		return \openssl_decrypt($data, $this->cipher, $secret, OPENSSL_RAW_DATA, $iv);
-	}
+        if (empty($this->key)) {
+            throw EncryptionException::forNeedsStarterKey();
+        }
 
+        // derive a secret key
+        $authKey = \hash_hkdf($this->digest, $this->key, 0, $this->authKeyInfo);
+
+        $hmacLength = $this->rawData
+            ? $this->digestSize[$this->digest]
+            : $this->digestSize[$this->digest] * 2;
+
+        $hmacKey  = self::substr($data, 0, $hmacLength);
+        $data     = self::substr($data, $hmacLength);
+        $hmacCalc = \hash_hmac($this->digest, $data, $authKey, $this->rawData);
+
+        if (! hash_equals($hmacKey, $hmacCalc)) {
+            throw EncryptionException::forAuthenticationFailed();
+        }
+
+        $data = $this->rawData ? $data : base64_decode($data, true);
+
+        if ($ivSize = \openssl_cipher_iv_length($this->cipher)) {
+            $iv   = self::substr($data, 0, $ivSize);
+            $data = self::substr($data, $ivSize);
+        } else {
+            $iv = null;
+        }
+
+        // derive a secret key
+        $encryptKey = \hash_hkdf($this->digest, $this->key, 0, $this->encryptKeyInfo);
+
+        return \openssl_decrypt($data, $this->cipher, $encryptKey, OPENSSL_RAW_DATA, $iv);
+    }
 }

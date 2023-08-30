@@ -1,106 +1,79 @@
 <?php
 
 /**
- * CodeIgniter
+ * This file is part of CodeIgniter 4 framework.
  *
- * An open source application development framework for PHP
+ * (c) CodeIgniter Foundation <admin@codeigniter.com>
  *
- * This content is released under the MIT License (MIT)
- *
- * Copyright (c) 2014-2019 British Columbia Institute of Technology
- * Copyright (c) 2019-2020 CodeIgniter Foundation
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * @package    CodeIgniter
- * @author     CodeIgniter Dev Team
- * @copyright  2019-2020 CodeIgniter Foundation
- * @license    https://opensource.org/licenses/MIT	MIT License
- * @link       https://codeigniter.com
- * @since      Version 4.0.0
- * @filesource
+ * For the full copyright and license information, please view
+ * the LICENSE file that was distributed with this source code.
  */
 
 namespace CodeIgniter\CLI;
 
 use CodeIgniter\CodeIgniter;
+use Config\Services;
+use Exception;
 
 /**
  * Console
  */
 class Console
 {
+    /**
+     * Runs the current command discovered on the CLI.
+     *
+     * @return int|void
+     *
+     * @throws Exception
+     */
+    public function run()
+    {
+        $runner  = Services::commands();
+        $params  = array_merge(CLI::getSegments(), CLI::getOptions());
+        $params  = $this->parseParamsForHelpOption($params);
+        $command = array_shift($params) ?? 'list';
 
-	/**
-	 * Main CodeIgniter instance.
-	 *
-	 * @var CodeIgniter
-	 */
-	protected $app;
+        return $runner->run($command, $params);
+    }
 
-	//--------------------------------------------------------------------
+    /**
+     * Displays basic information about the Console.
+     *
+     * @return void
+     */
+    public function showHeader(bool $suppress = false)
+    {
+        if ($suppress) {
+            return;
+        }
 
-	/**
-	 * Console constructor.
-	 *
-	 * @param \CodeIgniter\CodeIgniter $app
-	 */
-	public function __construct(CodeIgniter $app)
-	{
-		$this->app = $app;
-	}
+        CLI::write(sprintf(
+            'CodeIgniter v%s Command Line Tool - Server Time: %s UTC%s',
+            CodeIgniter::CI_VERSION,
+            date('Y-m-d H:i:s'),
+            date('P')
+        ), 'green');
+        CLI::newLine();
+    }
 
-	//--------------------------------------------------------------------
+    /**
+     * Introspects the `$params` passed for presence of the
+     * `--help` option.
+     *
+     * If present, it will be found as `['help' => null]`.
+     * We'll remove that as an option from `$params` and
+     * unshift it as argument instead.
+     */
+    private function parseParamsForHelpOption(array $params): array
+    {
+        if (array_key_exists('help', $params)) {
+            unset($params['help']);
 
-	/**
-	 * Runs the current command discovered on the CLI.
-	 *
-	 * @param boolean $useSafeOutput
-	 *
-	 * @return \CodeIgniter\HTTP\RequestInterface|\CodeIgniter\HTTP\Response|\CodeIgniter\HTTP\ResponseInterface|mixed
-	 * @throws \Exception
-	 */
-	public function run(bool $useSafeOutput = false)
-	{
-		$path = CLI::getURI() ?: 'list';
+            $params = $params === [] ? ['list'] : $params;
+            array_unshift($params, 'help');
+        }
 
-		// Set the path for the application to route to.
-		$this->app->setPath("ci{$path}");
-
-		return $this->app->useSafeOutput($useSafeOutput)->run();
-	}
-
-	//--------------------------------------------------------------------
-
-	/**
-	 * Displays basic information about the Console.
-	 */
-	public function showHeader()
-	{
-		CLI::newLine(1);
-
-		CLI::write(CLI::color('CodeIgniter CLI Tool', 'green')
-				. ' - Version ' . CodeIgniter::CI_VERSION
-				. ' - Server-Time: ' . date('Y-m-d H:i:sa'));
-
-		CLI::newLine(1);
-	}
-
-	//--------------------------------------------------------------------
+        return $params;
+    }
 }
