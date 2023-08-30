@@ -5,6 +5,8 @@ use CodeIgniter\Router\RouteCollection;
 /**
  * @var RouteCollection $routes
  */
+// Halo
+$routes->get('halo', 'Halo::index');
 // Home Barang
 $routes->get('/', 'Barang::index');
 $routes->get('barang', 'Barang::index');
